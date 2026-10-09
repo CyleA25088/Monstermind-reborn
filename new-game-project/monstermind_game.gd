@@ -64,6 +64,7 @@ func _card_list() -> Array:
 			{"id":"mint", "name":"COIN MINT", "cost":100, "color":Color("#d89b34"), "stat":"+12 COINS / SEC"},
 			{"id":"power", "name":"POWER PLANT", "cost":150, "color":Color("#e9c34e"), "stat":"+4 ENERGY / SEC"},
 			{"id":"water", "name":"WATER WORKS", "cost":150, "color":Color("#4f9ed0"), "stat":"+4 WATER / SEC"},
+			{"id":"home", "name":"HOME", "cost":200, "color":Color("#db5d52"), "stat":"+4 POPULATION"},
 			{"id":"town", "name":"TOWN HALL", "cost":400, "color":Color("#7189aa"), "stat":"FOUND YOUR CITY"}
 		]
 	return [
@@ -184,31 +185,37 @@ func _draw_hud() -> void:
 	draw_rect(Rect2(0, 82, w, 4), ORANGE)
 	draw_string(ui_font, Vector2(24, 35), "MONSTERMIND", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, NAVY)
 	draw_string(ui_font, Vector2(25, 59), "BLOWTOWN", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#709073"))
-	draw_string(ui_font, Vector2(w - 590, 39), "●  %d" % resources.coins, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#b77c20"))
-	draw_string(ui_font, Vector2(w - 470, 39), "⚡  %d" % resources.energy, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#d89d32"))
-	draw_string(ui_font, Vector2(w - 350, 39), "💧  %d" % resources.water, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#4f85dc"))
-	draw_string(ui_font, Vector2(w - 230, 39), "♟  %d" % resources.population, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#65a46c"))
-	draw_circle(Vector2(w - 55, 32), 17, Color("#62c878"))
-	draw_string(ui_font, Vector2(w - 63, 39), "⚙", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
+	var stat_x := maxf(285.0, w - 590.0)
+	_draw_resource_stat(Vector2(stat_x, 14), "CURRENCY", resources.coins, "COINS", Color("#b77c20"))
+	_draw_resource_stat(Vector2(stat_x + 120, 14), "POPULATION", resources.population, "RESIDENTS", Color("#65a46c"))
+	_draw_resource_stat(Vector2(stat_x + 240, 14), "ENERGY", resources.energy, "POWER", Color("#d89d32"))
+	_draw_resource_stat(Vector2(stat_x + 360, 14), "WATER", resources.water, "SUPPLY", Color("#4f85dc"))
 	draw_string(ui_font, Vector2(24, 120), "CITY 01  •  BUILD YOUR CITY" if build_phase else "CITY 01  •  DESTROY THE TOWN HALL", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, NAVY)
 	if not build_phase:
 		draw_string(ui_font, Vector2(w - 220, 120), "TIME  %03d" % int(mission_time), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#a44236"))
 
+func _draw_resource_stat(position: Vector2, label: String, value: int, suffix: String, color: Color) -> void:
+	draw_rect(Rect2(position, Vector2(108, 56)), Color("#fff8e7"))
+	draw_string(ui_font, position + Vector2(8, 16), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color("#6f7f76"))
+	draw_string(ui_font, position + Vector2(8, 39), "%d" % value, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, color)
+	draw_string(ui_font, position + Vector2(52, 38), suffix, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color("#6f7f76"))
+
 func _draw_deck() -> void:
 	var w := get_viewport_rect().size.x
 	draw_rect(Rect2(0, HUD_BOTTOM, w, get_viewport_rect().size.y - HUD_BOTTOM), Color("#e9dcc0"))
-	draw_string(ui_font, Vector2(22, HUD_BOTTOM + 25), "CITY ACTIONS", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#6f7f76"))
+	draw_string(ui_font, Vector2(22, HUD_BOTTOM + 25), "BUILDING SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#6f7f76"))
 	var cards := _card_list()
+	var card_width := minf(176.0, (w - 245.0) / float(cards.size()))
 	for i in cards.size():
 		var card: Dictionary = cards[i]
-		var rect := Rect2(250 + i * 190, HUD_BOTTOM + 2, 176, 108)
+		var rect := Rect2(210 + i * card_width, HUD_BOTTOM + 2, card_width - 8, 108)
 		draw_rect(rect, Color("#fff8e7") if selected_card == card.id else Color("#d4c5a9"))
 		draw_rect(rect, BLUE if selected_card == card.id else Color("#a99980"), false, 3.0)
-		draw_circle(rect.position + Vector2(31, 34), 22, card.color)
-		draw_string(ui_font, rect.position + Vector2(60, 27), card.name, HORIZONTAL_ALIGNMENT_LEFT, 108, 12, NAVY)
-		draw_string(ui_font, rect.position + Vector2(60, 49), card.stat, HORIZONTAL_ALIGNMENT_LEFT, 108, 10, Color("#6a756d"))
-		draw_rect(Rect2(rect.position + Vector2(60, 63), Vector2(54, 23)), Color("#efd36b"))
-		draw_string(ui_font, rect.position + Vector2(68, 80), str(card.cost), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#614b26"))
+		draw_circle(rect.position + Vector2(23, 34), 18, card.color)
+		draw_string(ui_font, rect.position + Vector2(46, 25), card.name, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 52, 10, NAVY)
+		draw_string(ui_font, rect.position + Vector2(46, 45), card.stat, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 52, 8, Color("#6a756d"))
+		draw_rect(Rect2(rect.position + Vector2(46, 62), Vector2(54, 23)), Color("#efd36b"))
+		draw_string(ui_font, rect.position + Vector2(55, 79), "%d C" % card.cost, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#614b26"))
 	if build_phase:
 		draw_rect(Rect2(w - 200, HUD_BOTTOM + 15, 120, 76), Color("#52a66a"))
 		draw_string(ui_font, Vector2(w - 183, HUD_BOTTOM + 46), "BUILD", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
@@ -306,6 +313,7 @@ func _place_building(id: String, grid: Vector2i) -> void:
 		"mint": {"label":"Coin Mint", "kind":"mint", "color":Color("#c89035"), "cost":100, "produces":"coins", "rate":12.0},
 		"power": {"label":"Power Plant", "kind":"power", "color":Color("#d6a83d"), "cost":150, "produces":"energy", "rate":4.0},
 		"water": {"label":"Water Works", "kind":"water", "color":Color("#4f9ed0"), "cost":150, "produces":"water", "rate":4.0},
+		"home": {"label":"Home", "kind":"home", "color":Color("#db5d52"), "cost":200, "produces":"", "rate":0.0},
 		"town": {"label":"Town Hall", "kind":"town", "color":Color("#7189aa"), "cost":400, "produces":"", "rate":0.0}
 	}
 	if not data.has(id):
@@ -324,6 +332,8 @@ func _place_building(id: String, grid: Vector2i) -> void:
 		mission_time = 180.0
 		selected_card = "ape"
 		adviser = "City founded! Select GIANT APE and destroy the Town Hall target in the next city."
+	elif id == "home":
+		adviser = "Home added 4 residents. Choose another building from the shop."
 	else:
 		adviser = "%s is producing %s. Build the other resource buildings next." % [info.label, info.produces.to_upper()]
 
@@ -380,8 +390,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			adviser = "Select a production card, then click an empty tile to place it."
 		return
 	var cards := _card_list()
+	var card_width := minf(176.0, (get_viewport_rect().size.x - 245.0) / float(cards.size()))
 	for i in cards.size():
-		if Rect2(250 + i * 190, HUD_BOTTOM + 2, 176, 108).has_point(mouse):
+		if Rect2(210 + i * card_width, HUD_BOTTOM + 2, card_width - 8, 108).has_point(mouse):
 			selected_card = cards[i].id
 			return
 	for i in buildings.size():
@@ -396,7 +407,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 	if mouse.y >= HUD_BOTTOM:
 		return
-	if build_phase and ["mint", "power", "water", "town"].has(selected_card):
+	if build_phase and ["mint", "power", "water", "home", "town"].has(selected_card):
 		var grid := _grid_from_mouse(mouse)
 		if grid.x < 0:
 			adviser = "Click inside the city grid to place your building."
