@@ -25,6 +25,10 @@ const ROAD_CELLS: Array[Vector2i] = [
 ]
 
 var ui_font: Font
+var ape_texture: Texture2D
+var ape_frame_size := Vector2.ZERO
+var home_texture: Texture2D
+var town_texture: Texture2D
 var buildings: Array = []
 var road_cells: Array[Vector2i] = []
 var monsters: Array = []
@@ -59,6 +63,11 @@ var monster_preview_grid := Vector2i(-1, -1)
 
 func _ready() -> void:
 	ui_font = ThemeDB.fallback_font
+	ape_texture = load("res://assets/sprites/giant-ape-enemy-sheet-draft.png")
+	if ape_texture:
+		ape_frame_size = Vector2(ape_texture.get_width() / 4.0, ape_texture.get_height() / 2.0)
+	home_texture = load("res://assets/sprites/house_plain_face_left.png")
+	town_texture = load("res://assets/sprites/town_center_face_left.png")
 	economy_system.controller = self
 	monster_system.controller = self
 	visual_system.controller = self
@@ -222,29 +231,36 @@ func _draw_building(b: Dictionary) -> void:
 	else:
 		foundation = PackedVector2Array([q + Vector2(-31, 8), q + Vector2(0, 20), q + Vector2(31, 8), q + Vector2(0, -4)])
 	draw_colored_polygon(foundation, Color("#fff0a8") if chosen else Color("#d5c49b"))
-	var body: PackedVector2Array
-	if b.kind == "store":
-		body = PackedVector2Array([
-			q + Vector2(-40, 8), q + Vector2(-40, -17), q + Vector2(0, -39),
-			q + Vector2(40, -17), q + Vector2(40, 8), q + Vector2(0, 29)
-		])
-	else:
-		body = PackedVector2Array([q + Vector2(-23, 1), q + Vector2(-23, -25), q + Vector2(0, -39), q + Vector2(23, -25), q + Vector2(23, 1), q + Vector2(0, 14)])
 	var connected := _is_building_connected(b)
-	draw_colored_polygon(body, Color("#7d756c") if not connected else (Color("#59494b") if b.state == "damaged" else b.color))
-	if b.kind == "home":
-		draw_colored_polygon(PackedVector2Array([q + Vector2(-28, -24), q + Vector2(0, -47), q + Vector2(28, -24), q + Vector2(0, -13)]), Color("#a73d43"))
-		draw_rect(Rect2(q + Vector2(-5, -5), Vector2(10, 18)), Color("#654434"))
-	elif b.kind == "store":
-		draw_colored_polygon(PackedVector2Array([q + Vector2(-45, -18), q + Vector2(0, -46), q + Vector2(45, -18), q + Vector2(0, 5)]), Color("#744b8e"))
-		draw_rect(Rect2(q + Vector2(-27, -8), Vector2(16, 12)), Color("#bce9e7"))
-		draw_rect(Rect2(q + Vector2(11, -8), Vector2(16, 12)), Color("#bce9e7"))
-		draw_rect(Rect2(q + Vector2(-5, 3), Vector2(10, 20)), Color("#5a3e4a"))
+	var building_texture: Texture2D = home_texture if b.kind == "home" else town_texture if b.kind == "town" else null
+	if building_texture:
+		var sprite_size := Vector2(112, 96) if b.kind == "home" else Vector2(154, 128)
+		var sprite_position := q + Vector2(-56, -82) if b.kind == "home" else q + Vector2(-77, -118)
+		draw_texture_rect(building_texture, Rect2(sprite_position, sprite_size), false)
 	else:
-		draw_rect(Rect2(q + Vector2(-13, -20), Vector2(10, 10)), Color("#bce9e7"))
-		draw_rect(Rect2(q + Vector2(4, -20), Vector2(10, 10)), Color("#bce9e7"))
-	if b.kind == "town":
+		var body: PackedVector2Array
+		if b.kind == "store":
+			body = PackedVector2Array([
+				q + Vector2(-40, 8), q + Vector2(-40, -17), q + Vector2(0, -39),
+				q + Vector2(40, -17), q + Vector2(40, 8), q + Vector2(0, 29)
+			])
+		else:
+			body = PackedVector2Array([q + Vector2(-23, 1), q + Vector2(-23, -25), q + Vector2(0, -39), q + Vector2(23, -25), q + Vector2(23, 1), q + Vector2(0, 14)])
+		draw_colored_polygon(body, Color("#7d756c") if not connected else (Color("#59494b") if b.state == "damaged" else b.color))
+		if b.kind == "home":
+			draw_colored_polygon(PackedVector2Array([q + Vector2(-28, -24), q + Vector2(0, -47), q + Vector2(28, -24), q + Vector2(0, -13)]), Color("#a73d43"))
+			draw_rect(Rect2(q + Vector2(-5, -5), Vector2(10, 18)), Color("#654434"))
+		elif b.kind == "store":
+			draw_colored_polygon(PackedVector2Array([q + Vector2(-45, -18), q + Vector2(0, -46), q + Vector2(45, -18), q + Vector2(0, 5)]), Color("#744b8e"))
+			draw_rect(Rect2(q + Vector2(-27, -8), Vector2(16, 12)), Color("#bce9e7"))
+			draw_rect(Rect2(q + Vector2(11, -8), Vector2(16, 12)), Color("#bce9e7"))
+			draw_rect(Rect2(q + Vector2(-5, 3), Vector2(10, 20)), Color("#5a3e4a"))
+		else:
+			draw_rect(Rect2(q + Vector2(-13, -20), Vector2(10, 10)), Color("#bce9e7"))
+			draw_rect(Rect2(q + Vector2(4, -20), Vector2(10, 10)), Color("#bce9e7"))
+	if b.kind == "town" and not town_texture:
 		draw_circle(q + Vector2(0, -45), 8, Color("#f6d36a"))
+	if b.kind == "town":
 		draw_string(ui_font, q + Vector2(-30, 36), "TOWN HALL", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#334454"))
 	if b.kind == "mint":
 		draw_string(ui_font, q + Vector2(-20, -31), "MINT", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
@@ -279,13 +295,20 @@ func _draw_building(b: Dictionary) -> void:
 func _draw_monster(m: Dictionary) -> void:
 	var q: Vector2 = m.pos
 	_draw_shadow_ellipse(q + Vector2(0, 12), Vector2(27, 10), Color(0.08, 0.12, 0.13, 0.3))
-	draw_circle(q + Vector2(0, -20), 22, Color("#4e332b") if m.kind == "ape" else Color("#4f9a59"))
-	draw_circle(q + Vector2(-16, -27), 9, Color("#684035"))
-	draw_circle(q + Vector2(16, -27), 9, Color("#684035"))
-	draw_circle(q + Vector2(-7, -23), 3, Color("#f6dd8d"))
-	draw_circle(q + Vector2(7, -23), 3, Color("#f6dd8d"))
-	draw_line(q + Vector2(-10, -5), q + Vector2(-18, 12), Color("#4e332b"), 8.0)
-	draw_line(q + Vector2(10, -5), q + Vector2(18, 12), Color("#4e332b"), 8.0)
+	if m.kind != "ape" or not ape_texture:
+		return
+	var frame := 0
+	var animation_time: float = m.get("animation_time", 0.0)
+	var attack_time: float = m.get("attack_animation", 0.0)
+	if attack_time > 0.0:
+		frame = 5 if attack_time > 0.21 else 6
+	elif m.get("moving", false):
+		frame = 1 + (int(animation_time * 8.0) % 3)
+	var column := frame % 4
+	var row := frame / 4
+	var source := Rect2(Vector2(column, row) * ape_frame_size, ape_frame_size)
+	var destination := Rect2(q + Vector2(-48, -92), Vector2(96, 96))
+	draw_texture_rect_region(ape_texture, destination, source)
 
 func _draw_hud() -> void:
 	var w := get_viewport_rect().size.x
@@ -421,6 +444,8 @@ func _retry_rect() -> Rect2:
 func _update_monsters(delta: float) -> void:
 	for i in range(monsters.size() - 1, -1, -1):
 		var m: Dictionary = monsters[i]
+		m.animation_time = float(m.get("animation_time", 0.0)) + delta
+		m.attack_animation = maxf(0.0, float(m.get("attack_animation", 0.0)) - delta)
 		m.cooldown -= delta
 		if m.moving:
 			m.move_progress += delta / 0.42
@@ -435,6 +460,7 @@ func _update_monsters(delta: float) -> void:
 			m.target = target
 			if m.cooldown <= 0.0:
 				m.cooldown = 1.05
+				m.attack_animation = 0.42
 				_damage(target, 414)
 			continue
 		var next_grid: Vector2i = m.grid + m.direction
@@ -884,7 +910,7 @@ func _handle_input(event: InputEvent) -> void:
 			return
 		var attack_direction := _attack_direction(attack_grid)
 		var entry_grid := attack_grid - attack_direction
-		monsters.append({"kind": "ape", "grid": entry_grid, "direction": attack_direction, "pos": _iso(entry_grid), "from_pos": _iso(entry_grid), "to_pos": _iso(entry_grid), "to_grid": entry_grid, "target": -1, "cooldown": 0.3, "move_progress": 1.0, "moving": false})
+		monsters.append({"kind": "ape", "grid": entry_grid, "direction": attack_direction, "pos": _iso(entry_grid), "from_pos": _iso(entry_grid), "to_pos": _iso(entry_grid), "to_grid": entry_grid, "target": -1, "cooldown": 0.3, "move_progress": 1.0, "moving": false, "animation_time": 0.0, "attack_animation": 0.0})
 		adviser = "Giant Ape enters from outside the map and advances in a straight grid line."
 	elif selected_card == "bomb" and resources.coins >= 150:
 		resources.coins -= 150
