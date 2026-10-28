@@ -132,6 +132,7 @@ func _card_list() -> Array:
 			{"id":"mint", "name":"COIN MINT", "cost":100, "color":Color("#d89b34"), "stat":"+12 COINS / SEC"},
 			{"id":"power", "name":"POWER PLANT", "cost":150, "color":Color("#e9c34e"), "stat":"+4 ENERGY / SEC"},
 			{"id":"water", "name":"WATER WORKS", "cost":150, "color":Color("#4f9ed0"), "stat":"+4 WATER / SEC"},
+			{"id":"road", "name":"ROAD", "cost":25, "color":Color("#8a6b45"), "stat":"CONNECT YOUR CITY"},
 			{"id":"home", "name":"HOME", "cost":200, "color":Color("#db5d52"), "stat":"+4 POPULATION"},
 			{"id":"store", "name":"STORE", "cost":250, "color":Color("#9a68b5"), "stat":"+8 COINS / 40 SEC"},
 			{"id":"defense", "name":"DEFENSE TOWER", "cost":300, "color":Color("#637783"), "stat":"%d DMG / 0.75 SEC" % TOWER_DAMAGE},
@@ -759,6 +760,7 @@ func _building_catalog() -> Dictionary:
 		"mint": {"label":"Coin Mint", "kind":"mint", "color":Color("#c89035"), "cost":100, "produces":"coins", "rate":12.0},
 		"power": {"label":"Power Plant", "kind":"power", "color":Color("#d6a83d"), "cost":150, "produces":"energy", "rate":4.0},
 		"water": {"label":"Water Works", "kind":"water", "color":Color("#4f9ed0"), "cost":150, "produces":"water", "rate":4.0},
+		"road": {"label":"Road", "kind":"road", "color":Color("#8a6b45"), "cost":25, "produces":"", "rate":0.0},
 		"home": {"label":"Home", "kind":"home", "color":Color("#db5d52"), "cost":200, "produces":"", "rate":0.0, "footprint":Vector2i(2, 2)},
 		"store": {"label":"Store", "kind":"store", "color":Color("#9a68b5"), "cost":250, "produces":"coins", "rate":8.0, "footprint":Vector2i(2, 3)},
 		"defense": {"label":"Defense Tower", "kind":"gun", "color":Color("#637783"), "cost":300, "produces":"", "rate":0.0},
@@ -794,6 +796,9 @@ func _buy_building_to_inventory(id: String) -> void:
 	inventory[id] += 1
 	placement_item = id
 	inventory_open = false
+	if id == "road":
+		adviser = "Road bought. Click an empty city cell to place it."
+		return
 	var footprint: Vector2i = info.get("footprint", Vector2i.ONE)
 	adviser = "%s bought. Click an empty %dx%d building footprint to place it." % [info.label, footprint.x, footprint.y]
 
