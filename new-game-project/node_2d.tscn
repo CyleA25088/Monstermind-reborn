@@ -1,22 +1,22 @@
-[gd_scene load_steps=6 format=3 uid="uid://4pqund3nukl7"]
+[gd_scene format=3 uid="uid://4pqund3nukl7"]
 
-[ext_resource type="Script" path="res://monstermind_game.gd" id="1_game"]
-[ext_resource type="Script" path="res://input_router.gd" id="2_input"]
-[ext_resource type="Script" path="res://economy_system.gd" id="3_economy"]
-[ext_resource type="Script" path="res://monster_system.gd" id="4_monsters"]
-[ext_resource type="Script" path="res://visual_system.gd" id="5_visuals"]
+[ext_resource type="Script" uid="uid://bphl8171d77pp" path="res://monstermind_game.gd" id="1_game"]
+[ext_resource type="Script" uid="uid://d14ctisa7bpke" path="res://input_router.gd" id="2_input"]
+[ext_resource type="Script" uid="uid://bxb80vpdyqoho" path="res://economy_system.gd" id="3_economy"]
+[ext_resource type="Script" uid="uid://dx2iotvwl28ec" path="res://monster_system.gd" id="4_monsters"]
+[ext_resource type="Script" uid="uid://fbdg8klu5c86" path="res://visual_system.gd" id="5_visuals"]
 
 [node name="Node2D" type="Node2D" unique_id=925934231]
 script = ExtResource("1_game")
 
-[node name="InputRouter" type="Node" parent="."]
+[node name="InputRouter" type="Node" parent="." unique_id=1448923886]
 script = ExtResource("2_input")
 
-[node name="EconomySystem" type="Node" parent="."]
+[node name="EconomySystem" type="Node" parent="." unique_id=277446486]
 script = ExtResource("3_economy")
 
-[node name="MonsterSystem" type="Node" parent="."]
+[node name="MonsterSystem" type="Node" parent="." unique_id=1177427132]
 script = ExtResource("4_monsters")
 
-[node name="VisualSystem" type="Node" parent="."]
+[node name="VisualSystem" type="Node" parent="." unique_id=356421292]
 script = ExtResource("5_visuals")

@@ -25,6 +25,10 @@ const ROAD_CELLS: Array[Vector2i] = [
 ]
 
 var ui_font: Font
+var ape_texture: Texture2D
+var ape_frame_size := Vector2.ZERO
+var home_texture: Texture2D
+var town_texture: Texture2D
 var buildings: Array = []
 var road_cells: Array[Vector2i] = []
 var monsters: Array = []
@@ -40,7 +44,7 @@ var won := false
 var lost := false
 var build_phase := true
 var clock := 0.0
-var adviser := "Starter town ready. Buy buildings from the shop and place them from INVENTORY."
+var adviser := "Starter town ready. Buy a building, then click an empty city cell to place it."
 var inventory := {"mint": 0, "power": 0, "water": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0}
 var inventory_open := false
 var placement_item := ""
@@ -51,6 +55,8 @@ var context_road := Vector2i(-1, -1)
 var context_position := Vector2.ZERO
 var move_mode := false
 var monster_preview_grid := Vector2i(-1, -1)
+var active_facilities := 0
+var total_facilities := 0
 
 @onready var input_router: MonsterMindInputRouter = $InputRouter
 @onready var economy_system: MonsterMindEconomySystem = $EconomySystem
@@ -59,6 +65,11 @@ var monster_preview_grid := Vector2i(-1, -1)
 
 func _ready() -> void:
 	ui_font = ThemeDB.fallback_font
+	ape_texture = load("res://assets/sprites/giant-ape-enemy-sheet-draft.png")
+	if ape_texture:
+		ape_frame_size = Vector2(ape_texture.get_width() / 4.0, ape_texture.get_height() / 2.0)
+	home_texture = load("res://assets/sprites/house_plain_face_left.png")
+	town_texture = load("res://assets/sprites/town_center_face_left.png")
 	economy_system.controller = self
 	monster_system.controller = self
 	visual_system.controller = self
@@ -82,13 +93,10 @@ func _make_city() -> void:
 	# Compact starter layout based on the reference game's opening town:
 	# one Town Hall, a few homes, and a Coin Mint connected by cell roads.
 	buildings = [
-		_make_building("Town Hall", Vector2i(6, 3), "town", Color("#7189aa"), 500),
-		_make_building("Home", Vector2i(3, 2), "home", Color("#db5d52"), 300),
-		_make_building("Home", Vector2i(7, 2), "home", Color("#db5d52"), 300),
-		_make_building("Home", Vector2i(4, 4), "home", Color("#db5d52"), 300),
-		_make_building("Coin Mint", Vector2i(8, 4), "mint", Color("#c89035"), 300, "intact", "coins", 12.0)
+		# The screen-facing footprint is 2 horizontal cells by 3 vertical cells.
+		_make_building("Town Hall", Vector2i(6, 3), "town", Color("#7189aa"), 500, "intact", "", 0.0, Vector2i(3, 2))
 	]
-	road_cells = ROAD_CELLS.duplicate()
+	road_cells = []
 	# A cell can hold exactly one thing. Starter buildings take priority, so
 	# remove any matching road cell instead of drawing a road underneath them.
 	for starter in buildings:
@@ -102,7 +110,7 @@ func _make_city() -> void:
 	move_mode = false
 	build_phase = true
 	selected_card = "home"
-	adviser = "Starter town ready. Buy buildings from the shop and place them from INVENTORY."
+	adviser = "Starter town ready. Buy a building, then click an empty city cell to place it."
 
 func _make_building(label: String, grid: Vector2i, kind: String, color: Color, health: int, state := "intact", produces := "", rate := 0.0, footprint := Vector2i.ONE) -> Dictionary:
 	var interval := 30.0
@@ -110,7 +118,7 @@ func _make_building(label: String, grid: Vector2i, kind: String, color: Color, h
 		interval = 45.0
 	if kind == "store":
 		interval = 40.0
-	return {"label": label, "grid": grid, "kind": kind, "footprint": footprint, "color": color, "hp": health, "max_hp": health, "state": state, "produces": produces, "rate": rate, "buffer": 0.0, "collect_timer": interval, "collect_interval": interval, "pending": 0}
+	return {"label": label, "grid": grid, "kind": kind, "footprint": footprint, "color": color, "hp": health, "max_hp": health, "state": state, "produces": produces, "rate": rate, "buffer": 0.0, "collect_timer": interval, "collect_interval": interval, "pending": 0, "active": false}
 
 func _card_list() -> Array:
 	if build_phase:
@@ -203,48 +211,66 @@ func _tile_polygon(grid: Vector2i, offset := Vector2.ZERO) -> PackedVector2Array
 
 func _building_center(building: Dictionary) -> Vector2:
 	var footprint: Vector2i = building.get("footprint", Vector2i.ONE)
-	return _iso(building.grid) + Vector2((footprint.x - 1) * TILE.x * 0.5, (footprint.y - 1) * TILE.y * 0.5)
+	var center_offset := Vector2(
+		((footprint.x - 1) - (footprint.y - 1)) * TILE.x * 0.5,
+		(footprint.x + footprint.y - 2) * TILE.y * 0.5
+	)
+	return _iso(building.grid) + center_offset
+
+func _building_footprint_polygon(building: Dictionary) -> PackedVector2Array:
+	var footprint: Vector2i = building.get("footprint", Vector2i.ONE)
+	var origin := _iso(building.grid)
+	return PackedVector2Array([
+		origin + Vector2(0, -TILE.y),
+		_iso(building.grid + Vector2i(footprint.x - 1, 0)) + Vector2(TILE.x, 0),
+		_iso(building.grid + footprint - Vector2i.ONE) + Vector2(0, TILE.y),
+		_iso(building.grid + Vector2i(0, footprint.y - 1)) + Vector2(-TILE.x, 0)
+	])
 
 func _draw_building(b: Dictionary) -> void:
 	var q: Vector2 = _building_center(b)
+	var footprint_polygon := _building_footprint_polygon(b)
 	if b.state == "destroyed":
 		draw_circle(q + Vector2(0, 7), 25, Color("#5d554e"))
 		draw_string(ui_font, q + Vector2(-28, 36), "RUBBLE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#514940"))
 		return
 	var chosen: bool = selected_building >= 0 and buildings[selected_building] == b
-	var foundation: PackedVector2Array
-	if b.kind == "store":
-		# Union of two adjacent 2:1 isometric cells, viewed as one lot.
-		foundation = PackedVector2Array([
-			q + Vector2(-22, -33), q + Vector2(22, -11), q + Vector2(66, 11),
-			q + Vector2(22, 33), q + Vector2(-22, 11), q + Vector2(-66, -11)
-		])
-	else:
-		foundation = PackedVector2Array([q + Vector2(-31, 8), q + Vector2(0, 20), q + Vector2(31, 8), q + Vector2(0, -4)])
-	draw_colored_polygon(foundation, Color("#fff0a8") if chosen else Color("#d5c49b"))
-	var body: PackedVector2Array
-	if b.kind == "store":
-		body = PackedVector2Array([
-			q + Vector2(-40, 8), q + Vector2(-40, -17), q + Vector2(0, -39),
-			q + Vector2(40, -17), q + Vector2(40, 8), q + Vector2(0, 29)
-		])
-	else:
-		body = PackedVector2Array([q + Vector2(-23, 1), q + Vector2(-23, -25), q + Vector2(0, -39), q + Vector2(23, -25), q + Vector2(23, 1), q + Vector2(0, 14)])
+	draw_colored_polygon(footprint_polygon, Color("#fff0a8") if chosen else Color("#d5c49b"))
 	var connected := _is_building_connected(b)
-	draw_colored_polygon(body, Color("#7d756c") if not connected else (Color("#59494b") if b.state == "damaged" else b.color))
-	if b.kind == "home":
-		draw_colored_polygon(PackedVector2Array([q + Vector2(-28, -24), q + Vector2(0, -47), q + Vector2(28, -24), q + Vector2(0, -13)]), Color("#a73d43"))
-		draw_rect(Rect2(q + Vector2(-5, -5), Vector2(10, 18)), Color("#654434"))
-	elif b.kind == "store":
-		draw_colored_polygon(PackedVector2Array([q + Vector2(-45, -18), q + Vector2(0, -46), q + Vector2(45, -18), q + Vector2(0, 5)]), Color("#744b8e"))
-		draw_rect(Rect2(q + Vector2(-27, -8), Vector2(16, 12)), Color("#bce9e7"))
-		draw_rect(Rect2(q + Vector2(11, -8), Vector2(16, 12)), Color("#bce9e7"))
-		draw_rect(Rect2(q + Vector2(-5, 3), Vector2(10, 20)), Color("#5a3e4a"))
+	var population_inactive: bool = (_worker_cost(b.kind) > 0 and connected and not b.active)
+	var building_texture: Texture2D = home_texture if b.kind == "home" else town_texture if b.kind == "town" else null
+	if building_texture:
+		var footprint: Vector2i = b.get("footprint", Vector2i.ONE)
+		# The source sprites include their own isometric ground plane. Scale that
+		# plane to the full footprint width and pin its front tip to the lot.
+		var sprite_width := float(footprint.x + footprint.y) * TILE.x * 0.96
+		var sprite_size := Vector2(sprite_width, sprite_width * building_texture.get_height() / building_texture.get_width())
+		var sprite_position := Vector2(q.x - sprite_size.x * 0.5, footprint_polygon[2].y - sprite_size.y)
+		draw_texture_rect(building_texture, Rect2(sprite_position, sprite_size), false)
 	else:
-		draw_rect(Rect2(q + Vector2(-13, -20), Vector2(10, 10)), Color("#bce9e7"))
-		draw_rect(Rect2(q + Vector2(4, -20), Vector2(10, 10)), Color("#bce9e7"))
-	if b.kind == "town":
+		var body: PackedVector2Array
+		if b.kind == "store":
+			body = PackedVector2Array([
+				q + Vector2(-40, 8), q + Vector2(-40, -17), q + Vector2(0, -39),
+				q + Vector2(40, -17), q + Vector2(40, 8), q + Vector2(0, 29)
+			])
+		else:
+			body = PackedVector2Array([q + Vector2(-23, 1), q + Vector2(-23, -25), q + Vector2(0, -39), q + Vector2(23, -25), q + Vector2(23, 1), q + Vector2(0, 14)])
+		draw_colored_polygon(body, Color("#7d756c") if not connected or population_inactive else (Color("#59494b") if b.state == "damaged" else b.color))
+		if b.kind == "home":
+			draw_colored_polygon(PackedVector2Array([q + Vector2(-28, -24), q + Vector2(0, -47), q + Vector2(28, -24), q + Vector2(0, -13)]), Color("#a73d43"))
+			draw_rect(Rect2(q + Vector2(-5, -5), Vector2(10, 18)), Color("#654434"))
+		elif b.kind == "store":
+			draw_colored_polygon(PackedVector2Array([q + Vector2(-45, -18), q + Vector2(0, -46), q + Vector2(45, -18), q + Vector2(0, 5)]), Color("#744b8e"))
+			draw_rect(Rect2(q + Vector2(-27, -8), Vector2(16, 12)), Color("#bce9e7"))
+			draw_rect(Rect2(q + Vector2(11, -8), Vector2(16, 12)), Color("#bce9e7"))
+			draw_rect(Rect2(q + Vector2(-5, 3), Vector2(10, 20)), Color("#5a3e4a"))
+		else:
+			draw_rect(Rect2(q + Vector2(-13, -20), Vector2(10, 10)), Color("#bce9e7"))
+			draw_rect(Rect2(q + Vector2(4, -20), Vector2(10, 10)), Color("#bce9e7"))
+	if b.kind == "town" and not town_texture:
 		draw_circle(q + Vector2(0, -45), 8, Color("#f6d36a"))
+	if b.kind == "town":
 		draw_string(ui_font, q + Vector2(-30, 36), "TOWN HALL", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#334454"))
 	if b.kind == "mint":
 		draw_string(ui_font, q + Vector2(-20, -31), "MINT", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
@@ -266,6 +292,9 @@ func _draw_building(b: Dictionary) -> void:
 	if not connected:
 		draw_circle(q + Vector2(27, -47), 7, Color("#d9534f"))
 		draw_string(ui_font, q + Vector2(31, -43), "!", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+	if population_inactive: 
+		draw_circle(q + Vector2(27, -47), 7, Color("#d9534f"))
+		draw_string(ui_font, q + Vector2(31, -43), "!", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
 	elif b.pending > 0:
 		draw_circle(q + Vector2(27, -47), 7, Color("#f2c24f"))
 		draw_string(ui_font, q + Vector2(24, -43), "$", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
@@ -279,13 +308,20 @@ func _draw_building(b: Dictionary) -> void:
 func _draw_monster(m: Dictionary) -> void:
 	var q: Vector2 = m.pos
 	_draw_shadow_ellipse(q + Vector2(0, 12), Vector2(27, 10), Color(0.08, 0.12, 0.13, 0.3))
-	draw_circle(q + Vector2(0, -20), 22, Color("#4e332b") if m.kind == "ape" else Color("#4f9a59"))
-	draw_circle(q + Vector2(-16, -27), 9, Color("#684035"))
-	draw_circle(q + Vector2(16, -27), 9, Color("#684035"))
-	draw_circle(q + Vector2(-7, -23), 3, Color("#f6dd8d"))
-	draw_circle(q + Vector2(7, -23), 3, Color("#f6dd8d"))
-	draw_line(q + Vector2(-10, -5), q + Vector2(-18, 12), Color("#4e332b"), 8.0)
-	draw_line(q + Vector2(10, -5), q + Vector2(18, 12), Color("#4e332b"), 8.0)
+	if m.kind != "ape" or not ape_texture:
+		return
+	var frame := 0
+	var animation_time: float = m.get("animation_time", 0.0)
+	var attack_time: float = m.get("attack_animation", 0.0)
+	if attack_time > 0.0:
+		frame = 5 if attack_time > 0.21 else 6
+	elif m.get("moving", false):
+		frame = 1 + (int(animation_time * 8.0) % 3)
+	var column := frame % 4
+	var row := frame / 4
+	var source := Rect2(Vector2(column, row) * ape_frame_size, ape_frame_size)
+	var destination := Rect2(q + Vector2(-48, -92), Vector2(96, 96))
+	draw_texture_rect_region(ape_texture, destination, source)
 
 func _draw_hud() -> void:
 	var w := get_viewport_rect().size.x
@@ -298,6 +334,7 @@ func _draw_hud() -> void:
 	_draw_resource_stat(Vector2(stat_x + 120, 14), "POPULATION", resources.population, "RESIDENTS", Color("#65a46c"))
 	_draw_resource_stat(Vector2(stat_x + 240, 14), "ENERGY", resources.energy, "POWER", Color("#d89d32"))
 	_draw_resource_stat(Vector2(stat_x + 360, 14), "WATER", resources.water, "SUPPLY", Color("#4f85dc"))
+	_draw_resource_stat(Vector2(stat_x + 480, 14),"FACILITIES",active_facilities,"ACTIVE",Color("#65a46c"))
 	draw_string(ui_font, Vector2(24, 120), "CITY 01  •  BUILD YOUR CITY" if build_phase else "CITY 01  •  DESTROY THE TOWN HALL", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, NAVY)
 	if not build_phase:
 		draw_string(ui_font, Vector2(w - 220, 120), "TIME  %03d" % int(mission_time), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#a44236"))
@@ -429,6 +466,8 @@ func _retry_rect() -> Rect2:
 func _update_monsters(delta: float) -> void:
 	for i in range(monsters.size() - 1, -1, -1):
 		var m: Dictionary = monsters[i]
+		m.animation_time = float(m.get("animation_time", 0.0)) + delta
+		m.attack_animation = maxf(0.0, float(m.get("attack_animation", 0.0)) - delta)
 		m.cooldown -= delta
 		if m.moving:
 			m.move_progress += delta / 0.42
@@ -443,6 +482,7 @@ func _update_monsters(delta: float) -> void:
 			m.target = target
 			if m.cooldown <= 0.0:
 				m.cooldown = 1.05
+				m.attack_animation = 0.42
 				_damage(target, 414)
 			continue
 		var next_grid: Vector2i = m.grid + m.direction
@@ -538,10 +578,67 @@ func _worker_cost(kind: String) -> int:
 		return 1
 	return 0
 
-func _update_production(delta: float) -> void:
-	for b in buildings:
-		if b.state != "intact" or b.produces == "" or not _is_building_connected(b):
+func _recalculate_population() -> void:
+	var total_population := 0
+
+	# Reset every facility before recalculating.
+	for building in buildings:
+		building.active = false
+
+	# Connected homes provide population.
+	for building in buildings:
+		if building.state != "intact":
 			continue
+
+		if not _is_building_connected(building):
+			continue
+
+		if building.kind == "home":
+			total_population += 4
+
+	# Facilities consume population in creation order.
+	var available_population := total_population
+	active_facilities = 0
+	total_facilities = 0
+	var inactive_buildings: Array[String] = []
+
+	for building in buildings:
+		if building.state != "intact":
+			continue
+
+		var cost := _worker_cost(building.kind)
+
+		if cost <= 0:
+			continue
+
+		total_facilities += 1
+
+		if not _is_building_connected(building):
+			inactive_buildings.append(building.label + " is disconnected")
+			continue
+
+		if available_population >= cost:
+			building.active = true
+			available_population -= cost
+			active_facilities += 1
+		else:
+			inactive_buildings.append(building.label + " needs more population")
+
+	resources.population = available_population
+
+	if inactive_buildings.size() > 0:
+		adviser = "Not enough population. Inactive: " + ", ".join(inactive_buildings)
+
+func _update_production(delta: float) -> void:
+	_recalculate_population()
+	for b in buildings:
+		if b.state != "intact":
+			continue
+		if not b.active:
+			continue
+		if b.produces == "":
+			continue
+				
 		b.collect_timer -= delta
 		if b.collect_timer <= 0.0:
 			b.pending += int(b.rate)
@@ -621,10 +718,10 @@ func _building_catalog() -> Dictionary:
 		"mint": {"label":"Coin Mint", "kind":"mint", "color":Color("#c89035"), "cost":100, "produces":"coins", "rate":12.0},
 		"power": {"label":"Power Plant", "kind":"power", "color":Color("#d6a83d"), "cost":150, "produces":"energy", "rate":4.0},
 		"water": {"label":"Water Works", "kind":"water", "color":Color("#4f9ed0"), "cost":150, "produces":"water", "rate":4.0},
-		"home": {"label":"Home", "kind":"home", "color":Color("#db5d52"), "cost":200, "produces":"", "rate":0.0},
-		"store": {"label":"Store", "kind":"store", "color":Color("#9a68b5"), "cost":250, "produces":"coins", "rate":8.0, "footprint":Vector2i(2, 1)},
+		"home": {"label":"Home", "kind":"home", "color":Color("#db5d52"), "cost":200, "produces":"", "rate":0.0, "footprint":Vector2i(2, 2)},
+		"store": {"label":"Store", "kind":"store", "color":Color("#9a68b5"), "cost":250, "produces":"coins", "rate":8.0, "footprint":Vector2i(2, 3)},
 		"defense": {"label":"Defense Tower", "kind":"gun", "color":Color("#637783"), "cost":300, "produces":"", "rate":0.0},
-		"town": {"label":"Town Hall", "kind":"town", "color":Color("#7189aa"), "cost":400, "produces":"", "rate":0.0}
+		"town": {"label":"Town Hall", "kind":"town", "color":Color("#7189aa"), "cost":400, "produces":"", "rate":0.0, "footprint":Vector2i(3, 2)}
 	}
 
 func _inventory_total() -> int:
@@ -654,9 +751,10 @@ func _buy_building_to_inventory(id: String) -> void:
 		return
 	resources.coins -= info.cost
 	inventory[id] += 1
-	inventory_open = true
-	placement_item = ""
-	adviser = "%s bought. Open INVENTORY and select it when you are ready to place it." % info.label
+	placement_item = id
+	inventory_open = false
+	var footprint: Vector2i = info.get("footprint", Vector2i.ONE)
+	adviser = "%s bought. Click an empty %dx%d building footprint to place it." % [info.label, footprint.x, footprint.y]
 
 func _place_road(grid: Vector2i) -> void:
 	if grid in road_cells:
@@ -700,6 +798,7 @@ func _place_building(id: String, grid: Vector2i, from_inventory := false) -> voi
 		adviser = "Home added 4 residents. Choose another building from the shop."
 	else:
 		adviser = "%s is producing %s. Build the other resource buildings next." % [info.label, info.produces.to_upper()]
+	_recalculate_population()
 
 func _nearest_target(pos: Vector2) -> int:
 	var result := -1
@@ -757,13 +856,13 @@ func _handle_input(event: InputEvent) -> void:
 			won = false
 			lost = false
 			tutorial = true
-			adviser = "Starter town ready. Buy buildings from the shop and place them from INVENTORY."
+			adviser = "Starter town ready. Buy a building, then click an empty city cell to place it."
 		return
 	if tutorial:
 		var tutorial_button := Rect2(Vector2(get_viewport_rect().size.x * 0.5 + 85.0, 361.0), Vector2(130, 42))
 		if tutorial_button.has_point(mouse):
 			tutorial = false
-			adviser = "Buy a building from the shop, then place it from INVENTORY when ready."
+		adviser = "Buy a building from the shop, then click an empty city cell to place it."
 		return
 	if context_open:
 		var menu_pos := context_position
@@ -891,7 +990,7 @@ func _handle_input(event: InputEvent) -> void:
 			return
 		var attack_direction := _attack_direction(attack_grid)
 		var entry_grid := attack_grid - attack_direction
-		monsters.append({"kind": "ape", "grid": entry_grid, "direction": attack_direction, "pos": _iso(entry_grid), "from_pos": _iso(entry_grid), "to_pos": _iso(entry_grid), "to_grid": entry_grid, "target": -1, "cooldown": 0.3, "move_progress": 1.0, "moving": false})
+		monsters.append({"kind": "ape", "grid": entry_grid, "direction": attack_direction, "pos": _iso(entry_grid), "from_pos": _iso(entry_grid), "to_pos": _iso(entry_grid), "to_grid": entry_grid, "target": -1, "cooldown": 0.3, "move_progress": 1.0, "moving": false, "animation_time": 0.0, "attack_animation": 0.0})
 		adviser = "Giant Ape enters from outside the map and advances in a straight grid line."
 	elif selected_card == "bomb" and resources.coins >= 150:
 		resources.coins -= 150
