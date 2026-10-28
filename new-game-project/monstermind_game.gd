@@ -308,6 +308,13 @@ func _draw_resource_stat(position: Vector2, label: String, value: int, suffix: S
 	draw_string(ui_font, position + Vector2(8, 39), "%d" % value, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, color)
 	draw_string(ui_font, position + Vector2(52, 38), suffix, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color("#6f7f76"))
 
+func _attack_phase_button_rect() -> Rect2:
+	# Keep the phase button clear of the shop cards by anchoring it above the
+	# deck's top-right corner, with the same right inset as the HUD.
+	var viewport_size := get_viewport_rect().size
+	var button_width := minf(120.0, maxf(0.0, viewport_size.x - 16.0))
+	return Rect2(maxf(8.0, viewport_size.x - button_width - 20.0), HUD_BOTTOM - 64.0, button_width, 56.0)
+
 func _draw_deck() -> void:
 	var w := get_viewport_rect().size.x
 	draw_rect(Rect2(0, HUD_BOTTOM, w, get_viewport_rect().size.y - HUD_BOTTOM), Color("#e9dcc0"))
@@ -329,14 +336,15 @@ func _draw_deck() -> void:
 		draw_string(ui_font, rect.position + Vector2(46, 45), card.stat, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 52, 8, Color("#6a756d"))
 		draw_rect(Rect2(rect.position + Vector2(46, 62), Vector2(54, 23)), Color("#efd36b"))
 		draw_string(ui_font, rect.position + Vector2(55, 79), "%d C" % card.cost, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#614b26"))
+	var attack_button := _attack_phase_button_rect()
 	if build_phase:
-		draw_rect(Rect2(w - 200, HUD_BOTTOM + 15, 120, 76), Color("#52a66a"))
-		draw_string(ui_font, Vector2(w - 193, HUD_BOTTOM + 46), "START", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
-		draw_string(ui_font, Vector2(w - 180, HUD_BOTTOM + 68), "ATTACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#e8ffdf"))
+		draw_rect(attack_button, Color("#52a66a"))
+		draw_string(ui_font, attack_button.position + Vector2(7, 23), "START", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
+		draw_string(ui_font, attack_button.position + Vector2(20, 45), "ATTACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#e8ffdf"))
 	else:
-		draw_rect(Rect2(w - 200, HUD_BOTTOM + 15, 120, 76), Color("#d8544d"))
-		draw_string(ui_font, Vector2(w - 193, HUD_BOTTOM + 46), "END", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
-		draw_string(ui_font, Vector2(w - 184, HUD_BOTTOM + 68), "ATTACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ffe6bf"))
+		draw_rect(attack_button, Color("#d8544d"))
+		draw_string(ui_font, attack_button.position + Vector2(7, 23), "END", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
+		draw_string(ui_font, attack_button.position + Vector2(16, 45), "ATTACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ffe6bf"))
 
 func _draw_inventory_panel() -> void:
 	if not inventory_open:
@@ -793,15 +801,14 @@ func _handle_input(event: InputEvent) -> void:
 	if Rect2(20, HUD_BOTTOM + 38, 170, 54).has_point(mouse):
 		inventory_open = not inventory_open
 		return
-	if not build_phase and Rect2(get_viewport_rect().size.x - 200, HUD_BOTTOM + 15, 120, 76).has_point(mouse):
-		build_phase = true
-		monsters.clear()
-		selected_card = "home"
-		monster_preview_grid = Vector2i(-1, -1)
-		adviser = "Attack ended. Build defenses and expand your city."
-		return
-	if build_phase and Rect2(get_viewport_rect().size.x - 200, HUD_BOTTOM + 15, 120, 76).has_point(mouse):
-		if _has_town_hall_anywhere():
+	if _attack_phase_button_rect().has_point(mouse):
+		if not build_phase:
+			build_phase = true
+			monsters.clear()
+			selected_card = "home"
+			monster_preview_grid = Vector2i(-1, -1)
+			adviser = "Attack ended. Build defenses and expand your city."
+		elif _has_town_hall_anywhere():
 			build_phase = false
 			mission_time = 180.0
 			selected_card = "ape"
