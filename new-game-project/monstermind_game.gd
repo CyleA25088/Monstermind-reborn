@@ -55,6 +55,8 @@ var context_road := Vector2i(-1, -1)
 var context_position := Vector2.ZERO
 var move_mode := false
 var monster_preview_grid := Vector2i(-1, -1)
+var active_facilities := 0
+var total_facilities := 0
 
 @onready var input_router: MonsterMindInputRouter = $InputRouter
 @onready var economy_system: MonsterMindEconomySystem = $EconomySystem
@@ -119,7 +121,7 @@ func _make_building(label: String, grid: Vector2i, kind: String, color: Color, h
 		interval = 45.0
 	if kind == "store":
 		interval = 40.0
-	return {"label": label, "grid": grid, "kind": kind, "footprint": footprint, "color": color, "hp": health, "max_hp": health, "state": state, "produces": produces, "rate": rate, "buffer": 0.0, "collect_timer": interval, "collect_interval": interval, "pending": 0}
+	return {"label": label, "grid": grid, "kind": kind, "footprint": footprint, "color": color, "hp": health, "max_hp": health, "state": state, "produces": produces, "rate": rate, "buffer": 0.0, "collect_timer": interval, "collect_interval": interval, "pending": 0, "active": false}
 
 func _card_list() -> Array:
 	if build_phase:
@@ -232,6 +234,7 @@ func _draw_building(b: Dictionary) -> void:
 		foundation = PackedVector2Array([q + Vector2(-31, 8), q + Vector2(0, 20), q + Vector2(31, 8), q + Vector2(0, -4)])
 	draw_colored_polygon(foundation, Color("#fff0a8") if chosen else Color("#d5c49b"))
 	var connected := _is_building_connected(b)
+	var population_inactive: bool = (_worker_cost(b.kind) > 0 and connected and not b.active)
 	var building_texture: Texture2D = home_texture if b.kind == "home" else town_texture if b.kind == "town" else null
 	if building_texture:
 		var sprite_size := Vector2(112, 96) if b.kind == "home" else Vector2(154, 128)
@@ -246,7 +249,7 @@ func _draw_building(b: Dictionary) -> void:
 			])
 		else:
 			body = PackedVector2Array([q + Vector2(-23, 1), q + Vector2(-23, -25), q + Vector2(0, -39), q + Vector2(23, -25), q + Vector2(23, 1), q + Vector2(0, 14)])
-		draw_colored_polygon(body, Color("#7d756c") if not connected else (Color("#59494b") if b.state == "damaged" else b.color))
+		draw_colored_polygon(body, Color("#7d756c") if not connected or population_inactive else (Color("#59494b") if b.state == "damaged" else b.color))
 		if b.kind == "home":
 			draw_colored_polygon(PackedVector2Array([q + Vector2(-28, -24), q + Vector2(0, -47), q + Vector2(28, -24), q + Vector2(0, -13)]), Color("#a73d43"))
 			draw_rect(Rect2(q + Vector2(-5, -5), Vector2(10, 18)), Color("#654434"))
@@ -280,6 +283,9 @@ func _draw_building(b: Dictionary) -> void:
 		draw_line(q + Vector2(0, -28), q + Vector2(18, -43), Color("#26343d"), 6.0)
 		draw_string(ui_font, q + Vector2(-30, -49), "DEFENSE", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
 	if not connected:
+		draw_circle(q + Vector2(27, -47), 7, Color("#d9534f"))
+		draw_string(ui_font, q + Vector2(31, -43), "!", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
+	if population_inactive: 
 		draw_circle(q + Vector2(27, -47), 7, Color("#d9534f"))
 		draw_string(ui_font, q + Vector2(31, -43), "!", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.WHITE)
 	elif b.pending > 0:
@@ -321,6 +327,7 @@ func _draw_hud() -> void:
 	_draw_resource_stat(Vector2(stat_x + 120, 14), "POPULATION", resources.population, "RESIDENTS", Color("#65a46c"))
 	_draw_resource_stat(Vector2(stat_x + 240, 14), "ENERGY", resources.energy, "POWER", Color("#d89d32"))
 	_draw_resource_stat(Vector2(stat_x + 360, 14), "WATER", resources.water, "SUPPLY", Color("#4f85dc"))
+	_draw_resource_stat(Vector2(stat_x + 480, 14),"FACILITIES",active_facilities,"ACTIVE",Color("#65a46c"))
 	draw_string(ui_font, Vector2(24, 120), "CITY 01  •  BUILD YOUR CITY" if build_phase else "CITY 01  •  DESTROY THE TOWN HALL", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, NAVY)
 	if not build_phase:
 		draw_string(ui_font, Vector2(w - 220, 120), "TIME  %03d" % int(mission_time), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#a44236"))
@@ -556,10 +563,67 @@ func _worker_cost(kind: String) -> int:
 		return 1
 	return 0
 
-func _update_production(delta: float) -> void:
-	for b in buildings:
-		if b.state != "intact" or b.produces == "" or not _is_building_connected(b):
+func _recalculate_population() -> void:
+	var total_population := 0
+
+	# Reset every facility before recalculating.
+	for building in buildings:
+		building.active = false
+
+	# Connected homes provide population.
+	for building in buildings:
+		if building.state != "intact":
 			continue
+
+		if not _is_building_connected(building):
+			continue
+
+		if building.kind == "home":
+			total_population += 4
+
+	# Facilities consume population in creation order.
+	var available_population := total_population
+	active_facilities = 0
+	total_facilities = 0
+	var inactive_buildings: Array[String] = []
+
+	for building in buildings:
+		if building.state != "intact":
+			continue
+
+		var cost := _worker_cost(building.kind)
+
+		if cost <= 0:
+			continue
+
+		total_facilities += 1
+
+		if not _is_building_connected(building):
+			inactive_buildings.append(building.label + " is disconnected")
+			continue
+
+		if available_population >= cost:
+			building.active = true
+			available_population -= cost
+			active_facilities += 1
+		else:
+			inactive_buildings.append(building.label + " needs more population")
+
+	resources.population = available_population
+
+	if inactive_buildings.size() > 0:
+		adviser = "Not enough population. Inactive: " + ", ".join(inactive_buildings)
+
+func _update_production(delta: float) -> void:
+	_recalculate_population()
+	for b in buildings:
+		if b.state != "intact":
+			continue
+		if not b.active:
+			continue
+		if b.produces == "":
+			continue
+				
 		b.collect_timer -= delta
 		if b.collect_timer <= 0.0:
 			b.pending += int(b.rate)
@@ -718,6 +782,7 @@ func _place_building(id: String, grid: Vector2i, from_inventory := false) -> voi
 		adviser = "Home added 4 residents. Choose another building from the shop."
 	else:
 		adviser = "%s is producing %s. Build the other resource buildings next." % [info.label, info.produces.to_upper()]
+	_recalculate_population()
 
 func _nearest_target(pos: Vector2) -> int:
 	var result := -1
