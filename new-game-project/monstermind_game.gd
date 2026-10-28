@@ -14,6 +14,12 @@ const NAVY := Color("#193b5a")
 const BLUE := Color("#19b8d0")
 const ORANGE := Color("#f28c38")
 const GREEN := Color("#52c86b")
+const APE_DAMAGE := 65
+const APE_HEALTH := 180
+const BOMB_DAMAGE := 110
+const TOWER_DAMAGE := 55
+const TOWER_RANGE := 165.0
+const TOWER_COOLDOWN := 0.75
 
 ## Roads are visual infrastructure only. Each entry is a real isometric road
 ## cell; no road is drawn as a free-floating line between arbitrary points.
@@ -128,12 +134,12 @@ func _card_list() -> Array:
 			{"id":"water", "name":"WATER WORKS", "cost":150, "color":Color("#4f9ed0"), "stat":"+4 WATER / SEC"},
 			{"id":"home", "name":"HOME", "cost":200, "color":Color("#db5d52"), "stat":"+4 POPULATION"},
 			{"id":"store", "name":"STORE", "cost":250, "color":Color("#9a68b5"), "stat":"+8 COINS / 40 SEC"},
-			{"id":"defense", "name":"DEFENSE TOWER", "cost":300, "color":Color("#637783"), "stat":"GARRISON -2 POP"},
+			{"id":"defense", "name":"DEFENSE TOWER", "cost":300, "color":Color("#637783"), "stat":"%d DMG / 0.75 SEC" % TOWER_DAMAGE},
 			{"id":"town", "name":"TOWN HALL", "cost":400, "color":Color("#7189aa"), "stat":"FOUND YOUR CITY"}
 		]
 	return [
-		{"id":"ape", "name":"GIANT APE", "cost":450, "color":Color("#79504a"), "stat":"DAMAGE 414"},
-		{"id":"bomb", "name":"BOMB", "cost":150, "color":Color("#59697c"), "stat":"BLAST AREA"},
+		{"id":"ape", "name":"GIANT APE", "cost":450, "color":Color("#79504a"), "stat":"DAMAGE %d" % APE_DAMAGE},
+		{"id":"bomb", "name":"BOMB", "cost":150, "color":Color("#59697c"), "stat":"%d DAMAGE AREA" % BOMB_DAMAGE},
 		{"id":"home", "name":"RED ROOF HOME", "cost":300, "color":Color("#db5d52"), "stat":"POPULATION +4"}
 	]
 
@@ -464,6 +470,7 @@ func _retry_rect() -> Rect2:
 	return Rect2(Vector2(size.x * 0.5 - 80.0, 435.0), Vector2(160, 45))
 
 func _update_monsters(delta: float) -> void:
+	_update_defenses(delta)
 	for i in range(monsters.size() - 1, -1, -1):
 		var m: Dictionary = monsters[i]
 		m.animation_time = float(m.get("animation_time", 0.0)) + delta
@@ -483,7 +490,7 @@ func _update_monsters(delta: float) -> void:
 			if m.cooldown <= 0.0:
 				m.cooldown = 1.05
 				m.attack_animation = 0.42
-				_damage(target, 414)
+				_damage(target, APE_DAMAGE)
 			continue
 		var next_grid: Vector2i = m.grid + m.direction
 		if next_grid.x < 0 or next_grid.x >= COLS or next_grid.y < 0 or next_grid.y >= ROWS:
@@ -496,6 +503,28 @@ func _update_monsters(delta: float) -> void:
 		m.to_grid = next_grid
 		m.move_progress = 0.0
 		m.moving = true
+
+func _update_defenses(delta: float) -> void:
+	# Staffed, connected towers shoot nearby Giant Apes before they can keep
+	# damaging a building. Their cooldown keeps several towers useful without
+	# making an attacker disappear immediately.
+	for tower in buildings:
+		if tower.kind != "gun" or tower.state != "intact" or not tower.active:
+			continue
+		tower.defense_cooldown = maxf(0.0, float(tower.get("defense_cooldown", 0.0)) - delta)
+		if tower.defense_cooldown > 0.0:
+			continue
+		for monster_index in range(monsters.size() - 1, -1, -1):
+			var monster: Dictionary = monsters[monster_index]
+			if _building_center(tower).distance_to(monster.pos) > TOWER_RANGE:
+				continue
+			tower.defense_cooldown = TOWER_COOLDOWN
+			monster.hp -= TOWER_DAMAGE
+			particles.append({"pos": monster.pos, "life": 0.2, "kind": "hit"})
+			if monster.hp <= 0:
+				monsters.remove_at(monster_index)
+				adviser = "A Defense Tower stopped a Giant Ape."
+			break
 
 func _building_at_cell(grid: Vector2i) -> int:
 	for i in buildings.size():
@@ -585,7 +614,7 @@ func _recalculate_population() -> void:
 	for building in buildings:
 		building.active = false
 
-	# Connected homes provide population.
+	# The Town Hall supplies the starter workforce; connected homes expand it.
 	for building in buildings:
 		if building.state != "intact":
 			continue
@@ -593,7 +622,9 @@ func _recalculate_population() -> void:
 		if not _is_building_connected(building):
 			continue
 
-		if building.kind == "home":
+		if building.kind == "town":
+			total_population += 12
+		elif building.kind == "home":
 			total_population += 4
 
 	# Facilities consume population in creation order.
@@ -638,18 +669,28 @@ func _update_production(delta: float) -> void:
 			continue
 		if b.produces == "":
 			continue
-				
+		# Coin Mint cards promise coins per second, so pay them directly into the
+		# HUD balance instead of waiting for a hidden 30-second collection timer.
+		if b.kind == "mint":
+			b.buffer += b.rate * delta
+			var earned_coins := int(floor(b.buffer))
+			if earned_coins > 0:
+				resources.coins += earned_coins
+				b.buffer -= earned_coins
+			continue
 		b.collect_timer -= delta
 		if b.collect_timer <= 0.0:
 			b.pending += int(b.rate)
 			b.collect_timer += b.collect_interval
-	# Homes add residents, while connected businesses and defenses require
+	# The Town Hall starts with residents; homes add more, while connected businesses and defenses require
 	# residents to work and guard them. Disconnected buildings do nothing.
 	resources.population = 0
 	for b in buildings:
 		if b.state != "intact" or not _is_building_connected(b):
 			continue
-		if b.kind == "home":
+		if b.kind == "town":
+			resources.population += 12
+		elif b.kind == "home":
 			resources.population += 4
 		resources.population -= _worker_cost(b.kind)
 	resources.population = maxi(0, resources.population)
@@ -990,13 +1031,13 @@ func _handle_input(event: InputEvent) -> void:
 			return
 		var attack_direction := _attack_direction(attack_grid)
 		var entry_grid := attack_grid - attack_direction
-		monsters.append({"kind": "ape", "grid": entry_grid, "direction": attack_direction, "pos": _iso(entry_grid), "from_pos": _iso(entry_grid), "to_pos": _iso(entry_grid), "to_grid": entry_grid, "target": -1, "cooldown": 0.3, "move_progress": 1.0, "moving": false, "animation_time": 0.0, "attack_animation": 0.0})
+		monsters.append({"kind": "ape", "hp": APE_HEALTH, "grid": entry_grid, "direction": attack_direction, "pos": _iso(entry_grid), "from_pos": _iso(entry_grid), "to_pos": _iso(entry_grid), "to_grid": entry_grid, "target": -1, "cooldown": 0.3, "move_progress": 1.0, "moving": false, "animation_time": 0.0, "attack_animation": 0.0})
 		adviser = "Giant Ape enters from outside the map and advances in a straight grid line."
 	elif selected_card == "bomb" and resources.coins >= 150:
 		resources.coins -= 150
 		for i in buildings.size():
 			if _building_center(buildings[i]).distance_to(mouse) < 80.0:
-				_damage(i, 260)
+				_damage(i, BOMB_DAMAGE)
 		particles.append({"pos": mouse, "life": 0.6, "kind": "blast"})
 		adviser = "Bomb dropped. Anything in the blast radius takes damage!"
 
