@@ -44,7 +44,7 @@ var won := false
 var lost := false
 var build_phase := true
 var clock := 0.0
-var adviser := "Starter town ready. Buy buildings from the shop and place them from INVENTORY."
+var adviser := "Starter town ready. Buy a building, then click an empty city cell to place it."
 var inventory := {"mint": 0, "power": 0, "water": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0}
 var inventory_open := false
 var placement_item := ""
@@ -93,13 +93,10 @@ func _make_city() -> void:
 	# Compact starter layout based on the reference game's opening town:
 	# one Town Hall, a few homes, and a Coin Mint connected by cell roads.
 	buildings = [
-		_make_building("Town Hall", Vector2i(6, 3), "town", Color("#7189aa"), 500),
-		_make_building("Home", Vector2i(3, 2), "home", Color("#db5d52"), 300),
-		_make_building("Home", Vector2i(7, 2), "home", Color("#db5d52"), 300),
-		_make_building("Home", Vector2i(4, 4), "home", Color("#db5d52"), 300),
-		_make_building("Coin Mint", Vector2i(8, 4), "mint", Color("#c89035"), 300, "intact", "coins", 12.0)
+		# The screen-facing footprint is 2 horizontal cells by 3 vertical cells.
+		_make_building("Town Hall", Vector2i(6, 3), "town", Color("#7189aa"), 500, "intact", "", 0.0, Vector2i(3, 2))
 	]
-	road_cells = ROAD_CELLS.duplicate()
+	road_cells = []
 	# A cell can hold exactly one thing. Starter buildings take priority, so
 	# remove any matching road cell instead of drawing a road underneath them.
 	for starter in buildings:
@@ -113,7 +110,7 @@ func _make_city() -> void:
 	move_mode = false
 	build_phase = true
 	selected_card = "home"
-	adviser = "Starter town ready. Buy buildings from the shop and place them from INVENTORY."
+	adviser = "Starter town ready. Buy a building, then click an empty city cell to place it."
 
 func _make_building(label: String, grid: Vector2i, kind: String, color: Color, health: int, state := "intact", produces := "", rate := 0.0, footprint := Vector2i.ONE) -> Dictionary:
 	var interval := 30.0
@@ -214,31 +211,41 @@ func _tile_polygon(grid: Vector2i, offset := Vector2.ZERO) -> PackedVector2Array
 
 func _building_center(building: Dictionary) -> Vector2:
 	var footprint: Vector2i = building.get("footprint", Vector2i.ONE)
-	return _iso(building.grid) + Vector2((footprint.x - 1) * TILE.x * 0.5, (footprint.y - 1) * TILE.y * 0.5)
+	var center_offset := Vector2(
+		((footprint.x - 1) - (footprint.y - 1)) * TILE.x * 0.5,
+		(footprint.x + footprint.y - 2) * TILE.y * 0.5
+	)
+	return _iso(building.grid) + center_offset
+
+func _building_footprint_polygon(building: Dictionary) -> PackedVector2Array:
+	var footprint: Vector2i = building.get("footprint", Vector2i.ONE)
+	var origin := _iso(building.grid)
+	return PackedVector2Array([
+		origin + Vector2(0, -TILE.y),
+		_iso(building.grid + Vector2i(footprint.x - 1, 0)) + Vector2(TILE.x, 0),
+		_iso(building.grid + footprint - Vector2i.ONE) + Vector2(0, TILE.y),
+		_iso(building.grid + Vector2i(0, footprint.y - 1)) + Vector2(-TILE.x, 0)
+	])
 
 func _draw_building(b: Dictionary) -> void:
 	var q: Vector2 = _building_center(b)
+	var footprint_polygon := _building_footprint_polygon(b)
 	if b.state == "destroyed":
 		draw_circle(q + Vector2(0, 7), 25, Color("#5d554e"))
 		draw_string(ui_font, q + Vector2(-28, 36), "RUBBLE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#514940"))
 		return
 	var chosen: bool = selected_building >= 0 and buildings[selected_building] == b
-	var foundation: PackedVector2Array
-	if b.kind == "store":
-		# Union of two adjacent 2:1 isometric cells, viewed as one lot.
-		foundation = PackedVector2Array([
-			q + Vector2(-22, -33), q + Vector2(22, -11), q + Vector2(66, 11),
-			q + Vector2(22, 33), q + Vector2(-22, 11), q + Vector2(-66, -11)
-		])
-	else:
-		foundation = PackedVector2Array([q + Vector2(-31, 8), q + Vector2(0, 20), q + Vector2(31, 8), q + Vector2(0, -4)])
-	draw_colored_polygon(foundation, Color("#fff0a8") if chosen else Color("#d5c49b"))
+	draw_colored_polygon(footprint_polygon, Color("#fff0a8") if chosen else Color("#d5c49b"))
 	var connected := _is_building_connected(b)
 	var population_inactive: bool = (_worker_cost(b.kind) > 0 and connected and not b.active)
 	var building_texture: Texture2D = home_texture if b.kind == "home" else town_texture if b.kind == "town" else null
 	if building_texture:
-		var sprite_size := Vector2(112, 96) if b.kind == "home" else Vector2(154, 128)
-		var sprite_position := q + Vector2(-56, -82) if b.kind == "home" else q + Vector2(-77, -118)
+		var footprint: Vector2i = b.get("footprint", Vector2i.ONE)
+		# The source sprites include their own isometric ground plane. Scale that
+		# plane to the full footprint width and pin its front tip to the lot.
+		var sprite_width := float(footprint.x + footprint.y) * TILE.x * 0.96
+		var sprite_size := Vector2(sprite_width, sprite_width * building_texture.get_height() / building_texture.get_width())
+		var sprite_position := Vector2(q.x - sprite_size.x * 0.5, footprint_polygon[2].y - sprite_size.y)
 		draw_texture_rect(building_texture, Rect2(sprite_position, sprite_size), false)
 	else:
 		var body: PackedVector2Array
@@ -703,10 +710,10 @@ func _building_catalog() -> Dictionary:
 		"mint": {"label":"Coin Mint", "kind":"mint", "color":Color("#c89035"), "cost":100, "produces":"coins", "rate":12.0},
 		"power": {"label":"Power Plant", "kind":"power", "color":Color("#d6a83d"), "cost":150, "produces":"energy", "rate":4.0},
 		"water": {"label":"Water Works", "kind":"water", "color":Color("#4f9ed0"), "cost":150, "produces":"water", "rate":4.0},
-		"home": {"label":"Home", "kind":"home", "color":Color("#db5d52"), "cost":200, "produces":"", "rate":0.0},
-		"store": {"label":"Store", "kind":"store", "color":Color("#9a68b5"), "cost":250, "produces":"coins", "rate":8.0, "footprint":Vector2i(2, 1)},
+		"home": {"label":"Home", "kind":"home", "color":Color("#db5d52"), "cost":200, "produces":"", "rate":0.0, "footprint":Vector2i(2, 2)},
+		"store": {"label":"Store", "kind":"store", "color":Color("#9a68b5"), "cost":250, "produces":"coins", "rate":8.0, "footprint":Vector2i(2, 3)},
 		"defense": {"label":"Defense Tower", "kind":"gun", "color":Color("#637783"), "cost":300, "produces":"", "rate":0.0},
-		"town": {"label":"Town Hall", "kind":"town", "color":Color("#7189aa"), "cost":400, "produces":"", "rate":0.0}
+		"town": {"label":"Town Hall", "kind":"town", "color":Color("#7189aa"), "cost":400, "produces":"", "rate":0.0, "footprint":Vector2i(3, 2)}
 	}
 
 func _inventory_total() -> int:
@@ -736,9 +743,10 @@ func _buy_building_to_inventory(id: String) -> void:
 		return
 	resources.coins -= info.cost
 	inventory[id] += 1
-	inventory_open = true
-	placement_item = ""
-	adviser = "%s bought. Open INVENTORY and select it when you are ready to place it." % info.label
+	placement_item = id
+	inventory_open = false
+	var footprint: Vector2i = info.get("footprint", Vector2i.ONE)
+	adviser = "%s bought. Click an empty %dx%d building footprint to place it." % [info.label, footprint.x, footprint.y]
 
 func _place_road(grid: Vector2i) -> void:
 	if grid in road_cells:
@@ -840,13 +848,13 @@ func _handle_input(event: InputEvent) -> void:
 			won = false
 			lost = false
 			tutorial = true
-			adviser = "Starter town ready. Buy buildings from the shop and place them from INVENTORY."
+			adviser = "Starter town ready. Buy a building, then click an empty city cell to place it."
 		return
 	if tutorial:
 		var tutorial_button := Rect2(Vector2(get_viewport_rect().size.x * 0.5 + 85.0, 361.0), Vector2(130, 42))
 		if tutorial_button.has_point(mouse):
 			tutorial = false
-			adviser = "Buy a building from the shop, then place it from INVENTORY when ready."
+		adviser = "Buy a building from the shop, then click an empty city cell to place it."
 		return
 	if context_open:
 		var menu_pos := context_position
