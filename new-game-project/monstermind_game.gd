@@ -565,20 +565,23 @@ func _monster_path_cells(start_grid: Vector2i) -> Array[Vector2i]:
 
 func _road_cells_connected_to_town() -> Dictionary:
 	var result := {}
-	var town_grid := Vector2i(-1, -1)
+	var town_hall: Dictionary = {}
 	for b in buildings:
 		if b.kind == "town" and b.state != "destroyed":
-			town_grid = b.grid
+			town_hall = b
 			break
-	if town_grid.x < 0:
+	if town_hall.is_empty():
 		return result
 	var directions: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 	var queue: Array[Vector2i] = []
-	for direction in directions:
-		var next_cell: Vector2i = town_grid + direction
-		if next_cell in road_cells and not result.has(next_cell):
-			result[next_cell] = true
-			queue.append(next_cell)
+	# A Town Hall occupies several cells.  Seed the search from every edge of
+	# its footprint so a road attached to any valid side of it reaches the city.
+	for town_cell in _building_footprint_cells(town_hall):
+		for direction in directions:
+			var next_cell: Vector2i = town_cell + direction
+			if next_cell in road_cells and not result.has(next_cell):
+				result[next_cell] = true
+				queue.append(next_cell)
 	var cursor := 0
 	while cursor < queue.size():
 		var current: Vector2i = queue[cursor]
@@ -656,10 +659,12 @@ func _recalculate_population() -> void:
 		else:
 			inactive_buildings.append(building.label + " needs more population")
 
-	resources.population = available_population
+	# The HUD calls this value "Residents", so keep it as the city's total
+	# connected population.  `available_population` is only staffing capacity.
+	resources.population = total_population
 
 	if inactive_buildings.size() > 0:
-		adviser = "Not enough population. Inactive: " + ", ".join(inactive_buildings)
+		adviser = "Inactive: " + ", ".join(inactive_buildings)
 
 func _update_production(delta: float) -> void:
 	_recalculate_population()
@@ -683,18 +688,6 @@ func _update_production(delta: float) -> void:
 		if b.collect_timer <= 0.0:
 			b.pending += int(b.rate)
 			b.collect_timer += b.collect_interval
-	# The Town Hall starts with residents; homes add more, while connected businesses and defenses require
-	# residents to work and guard them. Disconnected buildings do nothing.
-	resources.population = 0
-	for b in buildings:
-		if b.state != "intact" or not _is_building_connected(b):
-			continue
-		if b.kind == "town":
-			resources.population += 12
-		elif b.kind == "home":
-			resources.population += 4
-		resources.population -= _worker_cost(b.kind)
-	resources.population = maxi(0, resources.population)
 
 func _collect_context_target() -> void:
 	if context_type != "building" or context_building < 0 or context_building >= buildings.size():
@@ -838,13 +831,20 @@ func _place_building(id: String, grid: Vector2i, from_inventory := false) -> voi
 		resources.coins -= info.cost
 	buildings.append(_make_building(info.label, grid, info.kind, info.color, 500 if id == "town" else 300, "intact", info.produces, info.rate, footprint))
 	placement_item = ""
+	_recalculate_population()
+	var placed_building: Dictionary = buildings.back()
+	if id != "town" and not _is_building_connected(placed_building):
+		adviser = "%s placed, but it is disconnected. Build roads from its edge to any edge of the Town Hall." % info.label
+		return
+	if _worker_cost(placed_building.kind) > 0 and not placed_building.active:
+		adviser = "%s is connected but needs more residents before it can operate." % info.label
+		return
 	if id == "town":
 		adviser = "Town Hall placed. Your city can only have one. Keep building your starter town."
 	elif id == "home":
 		adviser = "Home added 4 residents. Choose another building from the shop."
 	else:
 		adviser = "%s is producing %s. Build the other resource buildings next." % [info.label, info.produces.to_upper()]
-	_recalculate_population()
 
 func _nearest_target(pos: Vector2) -> int:
 	var result := -1
