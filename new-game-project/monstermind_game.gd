@@ -40,7 +40,7 @@ var road_cells: Array[Vector2i] = []
 var monsters: Array = []
 var particles: Array = []
 var numbers: Array = []
-var resources := {"coins": 900, "energy": 0, "water": 0, "population": 0, "attack": 5}
+var resources := {"coins": 900, "population": 0, "attack": 5}
 var selected_card := "mint"
 var selected_building := -1
 var mission_time := 180.0
@@ -51,7 +51,7 @@ var lost := false
 var build_phase := true
 var clock := 0.0
 var adviser := "Starter town ready. Buy a building, then click an empty city cell to place it."
-var inventory := {"mint": 0, "power": 0, "water": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0}
+var inventory := {"mint": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0}
 var inventory_open := false
 var placement_item := ""
 var context_open := false
@@ -63,6 +63,7 @@ var move_mode := false
 var monster_preview_grid := Vector2i(-1, -1)
 var active_facilities := 0
 var total_facilities := 0
+var quit_confirmation_open := false
 
 @onready var input_router: MonsterMindInputRouter = $InputRouter
 @onready var economy_system: MonsterMindEconomySystem = $EconomySystem
@@ -85,7 +86,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	clock += delta
-	if not tutorial and not won and not lost:
+	if not quit_confirmation_open and not tutorial and not won and not lost:
 		economy_system.tick(delta)
 		if not build_phase:
 			mission_time = maxf(0.0, mission_time - delta)
@@ -108,8 +109,8 @@ func _make_city() -> void:
 	for starter in buildings:
 		for occupied_cell in _building_footprint_cells(starter):
 			road_cells.erase(occupied_cell)
-	resources = {"coins": 900, "energy": 0, "water": 0, "population": 12, "attack": 5}
-	inventory = {"mint": 0, "power": 0, "water": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0}
+	resources = {"coins": 900, "population": 12, "attack": 5}
+	inventory = {"mint": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0}
 	selected_building = -1
 	placement_item = ""
 	context_open = false
@@ -120,8 +121,6 @@ func _make_city() -> void:
 
 func _make_building(label: String, grid: Vector2i, kind: String, color: Color, health: int, state := "intact", produces := "", rate := 0.0, footprint := Vector2i.ONE) -> Dictionary:
 	var interval := 30.0
-	if kind == "power" or kind == "water":
-		interval = 45.0
 	if kind == "store":
 		interval = 40.0
 	return {"label": label, "grid": grid, "kind": kind, "footprint": footprint, "color": color, "hp": health, "max_hp": health, "state": state, "produces": produces, "rate": rate, "buffer": 0.0, "collect_timer": interval, "collect_interval": interval, "pending": 0, "active": false}
@@ -130,8 +129,6 @@ func _card_list() -> Array:
 	if build_phase:
 		return [
 			{"id":"mint", "name":"COIN MINT", "cost":100, "color":Color("#d89b34"), "stat":"+12 COINS / SEC"},
-			{"id":"power", "name":"POWER PLANT", "cost":150, "color":Color("#e9c34e"), "stat":"+4 ENERGY / SEC"},
-			{"id":"water", "name":"WATER WORKS", "cost":150, "color":Color("#4f9ed0"), "stat":"+4 WATER / SEC"},
 			{"id":"road", "name":"ROAD", "cost":25, "color":Color("#8a6b45"), "stat":"CONNECT YOUR CITY"},
 			{"id":"home", "name":"HOME", "cost":200, "color":Color("#db5d52"), "stat":"+4 POPULATION"},
 			{"id":"store", "name":"STORE", "cost":250, "color":Color("#9a68b5"), "stat":"+8 COINS / 40 SEC"},
@@ -165,6 +162,8 @@ func _draw() -> void:
 		_draw_result(true)
 	if lost:
 		_draw_result(false)
+	if quit_confirmation_open:
+		_draw_quit_confirmation()
 
 func _draw_map() -> void:
 	# The reference uses a clean lawn with the grid implied by roads and lots,
@@ -281,10 +280,6 @@ func _draw_building(b: Dictionary) -> void:
 		draw_string(ui_font, q + Vector2(-30, 36), "TOWN HALL", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#334454"))
 	if b.kind == "mint":
 		draw_string(ui_font, q + Vector2(-20, -31), "MINT", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
-	if b.kind == "power":
-		draw_string(ui_font, q + Vector2(-24, -31), "POWER", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
-	if b.kind == "water":
-		draw_string(ui_font, q + Vector2(-24, -31), "WATER", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
 	if b.kind == "store":
 		draw_string(ui_font, q + Vector2(-22, -31), "STORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color.WHITE)
 	if b.kind == "gas":
@@ -336,12 +331,10 @@ func _draw_hud() -> void:
 	draw_rect(Rect2(0, 82, w, 4), ORANGE)
 	draw_string(ui_font, Vector2(24, 35), "MONSTERMIND", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, NAVY)
 	draw_string(ui_font, Vector2(25, 59), "BLOWTOWN", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#709073"))
-	var stat_x := maxf(285.0, w - 590.0)
+	var stat_x := maxf(285.0, w - 350.0)
 	_draw_resource_stat(Vector2(stat_x, 14), "CURRENCY", resources.coins, "COINS", Color("#b77c20"))
 	_draw_resource_stat(Vector2(stat_x + 120, 14), "POPULATION", resources.population, "RESIDENTS", Color("#65a46c"))
-	_draw_resource_stat(Vector2(stat_x + 240, 14), "ENERGY", resources.energy, "POWER", Color("#d89d32"))
-	_draw_resource_stat(Vector2(stat_x + 360, 14), "WATER", resources.water, "SUPPLY", Color("#4f85dc"))
-	_draw_resource_stat(Vector2(stat_x + 480, 14),"FACILITIES",active_facilities,"ACTIVE",Color("#65a46c"))
+	_draw_resource_stat(Vector2(stat_x + 240, 14),"FACILITIES",active_facilities,"ACTIVE",Color("#65a46c"))
 	draw_string(ui_font, Vector2(24, 120), "CITY 01  •  BUILD YOUR CITY" if build_phase else "CITY 01  •  DESTROY THE TOWN HALL", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, NAVY)
 	if not build_phase:
 		draw_string(ui_font, Vector2(w - 220, 120), "TIME  %03d" % int(mission_time), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#a44236"))
@@ -400,7 +393,6 @@ func _draw_inventory_panel() -> void:
 	draw_string(ui_font, panel.position + Vector2(18, 48), "Buy now, place later", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#6a756d"))
 	var entries: Array[Dictionary] = [
 		{"id":"home", "name":"HOME"}, {"id":"mint", "name":"COIN MINT"},
-		{"id":"power", "name":"POWER PLANT"}, {"id":"water", "name":"WATER WORKS"},
 		{"id":"store", "name":"STORE (2 X 1)"}, {"id":"defense", "name":"DEFENSE TOWER"},
 		{"id":"road", "name":"ROAD CELL"}, {"id":"town", "name":"TOWN HALL"}
 	]
@@ -448,7 +440,7 @@ func _draw_tutorial() -> void:
 	draw_rect(Rect2(p.position, Vector2(p.size.x, 44)), ORANGE)
 	draw_string(ui_font, p.position + Vector2(22, 30), "MONSTERMIND ADVISER", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
 	draw_string(ui_font, p.position + Vector2(28, 83), "BUILD YOUR CITY", HORIZONTAL_ALIGNMENT_LEFT, -1, 25, NAVY)
-	draw_string(ui_font, p.position + Vector2(28, 119), "Start with a Coin Mint, Power Plant, and Water Works.", HORIZONTAL_ALIGNMENT_LEFT, 425, 15, Color("#526168"))
+	draw_string(ui_font, p.position + Vector2(28, 119), "Start with a Coin Mint and Homes for your workforce.", HORIZONTAL_ALIGNMENT_LEFT, 425, 15, Color("#526168"))
 	draw_string(ui_font, p.position + Vector2(28, 151), "Roads must connect every building back to the Town Hall.", HORIZONTAL_ALIGNMENT_LEFT, 425, 13, Color("#526168"))
 	draw_rect(Rect2(p.position + Vector2(330, 185), Vector2(130, 42)), GREEN)
 	draw_string(ui_font, p.position + Vector2(362, 212), "NICE!", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
@@ -465,6 +457,36 @@ func _draw_result(success: bool) -> void:
 	draw_string(ui_font, p.position + Vector2(45, 220), "REWARDS   ◆ 50     ● 1000" if success else "The timer ran out.", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, NAVY)
 	draw_rect(_retry_rect(), GREEN)
 	draw_string(ui_font, p.position + Vector2(265, 304), "RETRY", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
+
+func _quit_confirmation_panel_rect() -> Rect2:
+	var viewport_size := get_viewport_rect().size
+	var panel_width := minf(420.0, viewport_size.x - 32.0)
+	return Rect2(Vector2((viewport_size.x - panel_width) * 0.5, (viewport_size.y - 220.0) * 0.5), Vector2(panel_width, 220.0))
+
+func _quit_yes_rect() -> Rect2:
+	var panel := _quit_confirmation_panel_rect()
+	return Rect2(panel.position + Vector2(42, 151), Vector2((panel.size.x - 102.0) * 0.5, 45.0))
+
+func _quit_no_rect() -> Rect2:
+	var panel := _quit_confirmation_panel_rect()
+	return Rect2(Vector2(_quit_yes_rect().end.x + 18.0, panel.position.y + 151.0), Vector2((panel.size.x - 102.0) * 0.5, 45.0))
+
+func _draw_quit_confirmation() -> void:
+	var viewport_size := get_viewport_rect().size
+	var panel := _quit_confirmation_panel_rect()
+	draw_rect(Rect2(Vector2.ZERO, viewport_size), Color(0.04, 0.09, 0.12, 0.62))
+	draw_rect(panel, Color("#fff7dd"))
+	draw_rect(Rect2(panel.position, Vector2(panel.size.x, 52)), ORANGE)
+	draw_rect(panel, Color("#a99980"), false, 3.0)
+	draw_string(ui_font, panel.position + Vector2(28, 34), "QUIT MONSTERMIND?", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+	draw_string(ui_font, panel.position + Vector2(28, 97), "Are you sure you want to quit the game?", HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 56.0, 16, NAVY)
+	draw_string(ui_font, panel.position + Vector2(28, 124), "Unsaved progress will be lost.", HORIZONTAL_ALIGNMENT_LEFT, panel.size.x - 56.0, 13, Color("#6a756d"))
+	var yes_button := _quit_yes_rect()
+	var no_button := _quit_no_rect()
+	draw_rect(yes_button, Color("#d8544d"))
+	draw_rect(no_button, GREEN)
+	draw_string(ui_font, yes_button.position + Vector2(yes_button.size.x * 0.5 - 16.0, 29), "YES", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+	draw_string(ui_font, no_button.position + Vector2(no_button.size.x * 0.5 - 13.0, 29), "NO", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
 
 func _retry_rect() -> Rect2:
 	var size := get_viewport_rect().size
@@ -607,7 +629,7 @@ func _is_building_connected(building: Dictionary) -> bool:
 func _worker_cost(kind: String) -> int:
 	if kind == "gun":
 		return 2
-	if ["mint", "power", "water", "store", "gas", "shop"].has(kind):
+	if ["mint", "store", "gas", "shop"].has(kind):
 		return 1
 	return 0
 
@@ -751,8 +773,6 @@ func _occupied_by_building(grid: Vector2i) -> bool:
 func _building_catalog() -> Dictionary:
 	return {
 		"mint": {"label":"Coin Mint", "kind":"mint", "color":Color("#c89035"), "cost":100, "produces":"coins", "rate":12.0},
-		"power": {"label":"Power Plant", "kind":"power", "color":Color("#d6a83d"), "cost":150, "produces":"energy", "rate":4.0},
-		"water": {"label":"Water Works", "kind":"water", "color":Color("#4f9ed0"), "cost":150, "produces":"water", "rate":4.0},
 		"road": {"label":"Road", "kind":"road", "color":Color("#8a6b45"), "cost":25, "produces":"", "rate":0.0},
 		"home": {"label":"Home", "kind":"home", "color":Color("#db5d52"), "cost":200, "produces":"", "rate":0.0, "footprint":Vector2i(2, 2)},
 		"store": {"label":"Store", "kind":"store", "color":Color("#9a68b5"), "cost":250, "produces":"coins", "rate":8.0, "footprint":Vector2i(2, 3)},
@@ -885,6 +905,19 @@ func _update_visuals(delta: float) -> void:
 	numbers = numbers.filter(func(n): return n.life > 0.0)
 
 func _handle_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		quit_confirmation_open = not quit_confirmation_open
+		queue_redraw()
+		get_viewport().set_input_as_handled()
+		return
+	if quit_confirmation_open:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			if _quit_yes_rect().has_point(event.position):
+				get_tree().quit()
+			elif _quit_no_rect().has_point(event.position):
+				quit_confirmation_open = false
+				queue_redraw()
+		return
 	if event is InputEventMouseMotion:
 		if selected_card == "ape" and not tutorial and not build_phase:
 			monster_preview_grid = _grid_from_mouse(event.position)
@@ -930,7 +963,7 @@ func _handle_input(event: InputEvent) -> void:
 		if Rect2(20, HUD_BOTTOM + 38, 170, 54).has_point(mouse):
 			inventory_open = false
 			return
-		var entries: Array[String] = ["home", "mint", "power", "water", "store", "defense", "road", "town"]
+		var entries: Array[String] = ["home", "mint", "store", "defense", "road", "town"]
 		for row in entries.size():
 			var row_rect := Rect2(panel.position + Vector2(14, 58 + row * 43), Vector2(278, 35))
 			if row_rect.has_point(mouse):
