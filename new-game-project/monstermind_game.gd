@@ -51,7 +51,7 @@ var lost := false
 var build_phase := true
 var clock := 0.0
 var adviser := "Starter town ready. Buy a building, then click an empty city cell to place it."
-var inventory := {"mint": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0}
+var inventory := {"mint": 0, "power": 0, "water": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0, "ape": 0, "bomb": 0}
 var inventory_open := false
 var placement_item := ""
 var context_open := false
@@ -109,8 +109,8 @@ func _make_city() -> void:
 	for starter in buildings:
 		for occupied_cell in _building_footprint_cells(starter):
 			road_cells.erase(occupied_cell)
-	resources = {"coins": 900, "population": 12, "attack": 5}
-	inventory = {"mint": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0}
+	resources = {"coins": 900, "energy": 0, "water": 0, "population": 12, "attack": 5}
+	inventory = {"mint": 0, "power": 0, "water": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0, "ape": 0, "bomb": 0}
 	selected_building = -1
 	placement_item = ""
 	context_open = false
@@ -133,7 +133,8 @@ func _card_list() -> Array:
 			{"id":"home", "name":"HOME", "cost":200, "color":Color("#db5d52"), "stat":"+4 POPULATION"},
 			{"id":"store", "name":"STORE", "cost":250, "color":Color("#9a68b5"), "stat":"+8 COINS / 40 SEC"},
 			{"id":"defense", "name":"DEFENSE TOWER", "cost":300, "color":Color("#637783"), "stat":"%d DMG / 0.75 SEC" % TOWER_DAMAGE},
-			{"id":"town", "name":"TOWN HALL", "cost":400, "color":Color("#7189aa"), "stat":"FOUND YOUR CITY"}
+			{"id":"town", "name":"TOWN HALL", "cost":400, "color":Color("#7189aa"), "stat":"FOUND YOUR CITY"},
+			{"id":"ape", "name":"GIANT APE", "cost":450, "color":Color("#79504a"), "stat":"DAMAGE %d" % APE_DAMAGE}
 		]
 	return [
 		{"id":"ape", "name":"GIANT APE", "cost":450, "color":Color("#79504a"), "stat":"DAMAGE %d" % APE_DAMAGE},
@@ -815,6 +816,21 @@ func _buy_building_to_inventory(id: String) -> void:
 	var footprint: Vector2i = info.get("footprint", Vector2i.ONE)
 	adviser = "%s bought. Click an empty %dx%d building footprint to place it." % [info.label, footprint.x, footprint.y]
 
+func _buy_attack_to_inventory(id: String) -> void:
+	var attack_data := {
+		"ape": {"label": "Giant Ape", "cost": 450},
+		"bomb": {"label": "Bomb", "cost": 150}
+	}
+	if not attack_data.has(id):
+		return
+	var info: Dictionary = attack_data[id]
+	if resources.coins < info.cost:
+		adviser = "You need %d coins to buy the %s." % [info.cost, info.label]
+		return
+	resources.coins -= info.cost
+	inventory[id] += 1
+	adviser = "%s bought. It is ready for the next attack." % info.label
+
 func _place_road(grid: Vector2i) -> void:
 	if grid in road_cells:
 		adviser = "There is already a road cell there."
@@ -1005,7 +1021,10 @@ func _handle_input(event: InputEvent) -> void:
 			else:
 				monster_preview_grid = Vector2i(-1, -1)
 			if build_phase:
-				_buy_building_to_inventory(selected_card)
+				if selected_card == "ape" or selected_card == "bomb":
+					_buy_attack_to_inventory(selected_card)
+				else:
+					_buy_building_to_inventory(selected_card)
 			return
 	if move_mode:
 		var move_grid := _grid_from_mouse(mouse)
@@ -1060,12 +1079,15 @@ func _handle_input(event: InputEvent) -> void:
 		else:
 			_place_building(placement_item, clicked_grid, true)
 		return
-	if selected_card == "ape" and resources.attack > 0:
-		resources.attack -= 1
+	if selected_card == "ape":
+		if inventory["ape"] <= 0:
+			adviser = "Buy a Giant Ape from the shop before deploying it."
+			return
+		inventory["ape"] -= 1
 		var attack_grid := _grid_from_mouse(mouse)
 		if attack_grid.x < 0:
 			adviser = "Deploy the Giant Ape on a city grid cell."
-			resources.attack += 1
+			inventory["ape"] += 1
 			return
 		var attack_direction := _attack_direction(attack_grid)
 		var entry_grid := attack_grid - attack_direction
