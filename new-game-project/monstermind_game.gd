@@ -97,20 +97,99 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _make_city() -> void:
-	# Compact starter layout based on the reference game's opening town:
-	# one Town Hall, a few homes, and a Coin Mint connected by cell roads.
 	buildings = [
-		# The screen-facing footprint is 2 horizontal cells by 3 vertical cells.
-		_make_building("Town Hall", Vector2i(6, 3), "town", Color("#7189aa"), 500, "intact", "", 0.0, Vector2i(3, 2))
+		# Large building in the lower-right
+		_make_building(
+			"Town Hall",
+			Vector2i(6, 3),
+			"town",
+			Color("#7189aa"),
+			500,
+			"intact",
+			"",
+			0.0,
+			Vector2i(3, 2)
+		),
+
+		# Left-side home
+		_make_building(
+			"Home 1",
+			Vector2i(2, 3),
+			"home",
+			Color("#db5d52"),
+			300,
+			"intact",
+			"",
+			0.0,
+			Vector2i(2, 2)
+		),
+
+		# Upper home
+		_make_building(
+			"Home 2",
+			Vector2i(4, 0),
+			"home",
+			Color("#db5d52"),
+			300,
+			"intact",
+			"",
+			0.0,
+			Vector2i(2, 2)
+		),
+
+		# Mint above the Town Hall
+		_make_building(
+			"Coin Mint",
+			Vector2i(7, 1),
+			"mint",
+			Color("#c89035"),
+			300,
+			"intact",
+			"coins",
+			12.0
+		),
+
+		# Store below the Town Hall
+		_make_building(
+			"Store",
+			Vector2i(7, 5),
+			"store",
+			Color("#9a68b5"),
+			300,
+			"intact",
+			"coins",
+			8.0,
+			Vector2i(2, 3)
+		)
 	]
-	road_cells = []
-	# A cell can hold exactly one thing. Starter buildings take priority, so
-	# remove any matching road cell instead of drawing a road underneath them.
+
+	road_cells = ROAD_CELLS.duplicate()
+
 	for starter in buildings:
 		for occupied_cell in _building_footprint_cells(starter):
 			road_cells.erase(occupied_cell)
-	resources = {"coins": 900, "energy": 0, "water": 0, "population": 12, "attack": 5}
-	inventory = {"mint": 0, "power": 0, "water": 0, "home": 0, "store": 0, "defense": 0, "town": 0, "road": 0, "ape": 0, "bomb": 0}
+
+	resources = {
+		"coins": 900,
+		"energy": 0,
+		"water": 0,
+		"population": 20,
+		"attack": 5
+	}
+
+	inventory = {
+		"mint": 0,
+		"power": 0,
+		"water": 0,
+		"home": 0,
+		"store": 0,
+		"defense": 0,
+		"town": 0,
+		"road": 0,
+		"ape": 0,
+		"bomb": 0
+	}
+
 	selected_building = -1
 	placement_item = ""
 	context_open = false
@@ -118,7 +197,7 @@ func _make_city() -> void:
 	build_phase = true
 	selected_card = "home"
 	adviser = "Starter town ready. Buy a building, then click an empty city cell to place it."
-
+	
 func _make_building(label: String, grid: Vector2i, kind: String, color: Color, health: int, state := "intact", produces := "", rate := 0.0, footprint := Vector2i.ONE) -> Dictionary:
 	var interval := 30.0
 	if kind == "store":
